@@ -13,7 +13,7 @@ async function config(settings, reset) {
   if (!settings.syncServerUrl || !settings.syncUserName || !settings.syncUserPassword) {
     throw new Error("syncServerUrl, syncUserName and syncUserPassword are required in settings.");
   }
-  
+
   if (!settings.path) {
     settings.path = fs.PervasyncDir;
   }
@@ -43,7 +43,7 @@ async function sync() {
   if (context.settings.configured) {
     let syncSummary = await agent.sync();
     // PVS_WRONG_SYNC_SERVER_ID = 2025
-    if(syncSummary.errorCode == 2025){
+    if (syncSummary.errorCode == 2025) {
       await setup.setup(true);
       syncSummary = await agent.sync();
     }
@@ -57,5 +57,9 @@ export default {
   config,
   sync,
   getRealm,
-  getPath
+  getPath,
+  clientSchemaList: agent.clientSchemaList,
+  clientFolderList: agent.clientFolderList,
+  clientSchemaMap: agent.clientSchemaMap,
+  clientFolderMap: agent.clientFolderMap
 }
