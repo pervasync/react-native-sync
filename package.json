@@ -1,0 +1,34 @@
+{
+  "name": "react-native-sync",
+  "version": "1.0.0",
+  "description": "Two way, incremental sync between React Native realmjs database and MySQL, Oracle, MS SQL Server and PostgreSQL",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pervasync/react-native-sync.git"
+  },
+  "keywords": [
+    "React Native",
+    "realmjs",
+    "db",
+    "sync",
+    "database",
+    "MySQL",
+    "Oracle",
+    "SQL Server",
+    "PostgreSQL"
+  ],
+  "author": "Pervasync",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/pervasync/react-native-sync/issues"
+  },
+  "homepage": "https://github.com/pervasync/react-native-sync#readme",
+  "dependencies": {
+    "react-native-fetch-blob": "^0.10.6",
+    "realm": "^2.2.6"
+  }
+}
