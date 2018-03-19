@@ -18,9 +18,7 @@ let clientFolderSubMap = {};
 
 
 let schemaNameIdMap = {}; // schemaName->schemaId
-let syncRealmMap = {}; // schemaId->syncRealm
-let appRealmMap = {}; // schemaId->appRealm
-let lsnrRealmMap = {}; // schemaId->lsnrRealm
+let realmMap = {}; // schemaId->realm
 
 let pvcAdminRealm;
 let syncSummary = {};
@@ -96,17 +94,9 @@ async function destroy() {
     }
 
     // close realms
-    for (let key in syncRealmMap) {
-        syncRealmMap[key].close();
-        delete syncRealmMap[key]
-    }
-    for (let key in appRealmMap) {
-        appRealmMap[key].close();
-        delete appRealmMap[key]
-    }
-    for (let key in lsnrRealmMap) {
-        lsnrRealmMap[key].close();
-        delete lsnrRealmMap[key]
+    for (let key in realmMap) {
+        realmMap[key].close();
+        delete realmMap[key]
     }
 
     console.log("end agent destroy");
@@ -114,13 +104,13 @@ async function destroy() {
 
 function getRealm(schemaName) {
     let schemaId = schemaNameIdMap[schemaName];
-    return appRealmMap[schemaId];
+    return realmMap[schemaId];
 }
 
 function getPath(folderName) {
     let path = null;
-    for (let syncFolder of clientFolderList){
-        if(syncFolder.name == folderName){
+    for (let syncFolder of clientFolderList) {
+        if (syncFolder.name == folderName) {
             path = context.settings.path + "/files/" + syncFolder.clientFolderPath;
         }
     }
@@ -177,6 +167,7 @@ async function sync(syncDirection, syncSchemas, syncFolders) {
             }
 
             // sync summary
+            syncSummary.syncBeginTime = new Date().getTime();
             syncSummary.checkInDIU_requested = [0, 0, 0];
             syncSummary.checkInDIU_done = [0, 0, 0];
             syncSummary.refreshDIU_requested = [0, 0, 0];
@@ -184,8 +175,6 @@ async function sync(syncDirection, syncSchemas, syncFolders) {
             syncSummary.hasDefChanges = false;
             syncSummary.hasDataChanges = false;
             syncSummary.errorCode = -1;
-            syncSummary.syncSchemaNames = [];
-            syncSummary.syncFolderNames = [];
             syncSummary.checkInStatus = "NOT_AVAILABLE";
             syncSummary.checkInSchemaNames = [];
             syncSummary.refreshSchemaNames = [];
@@ -198,43 +187,52 @@ async function sync(syncDirection, syncSchemas, syncFolders) {
             syncSummary.user = context.settings.syncUserName;
             syncSummary.device = context.settings.syncDeviceName;
             syncSummary.syncDirection = syncDirection;
-            syncSummary.syncSchemaNames = syncSchemas;
-            syncSummary.syncFolderNames = syncFolders;
             syncSummary.syncErrorMessages = "";
             syncSummary.syncErrorStacktraces = "";
 
-            //console.log("query client state");
-            if (!syncSummary.syncSchemaNames ||
-                syncSummary.syncSchemaNames.length == 0) {
-                syncSummary.syncSchemaNames = [];
-                for (let schemaId in clientSchemaMap) {
-                    syncSummary.syncSchemaNames.push(clientSchemaMap[schemaId].name);
+            let setSchemaFolderNames = function () {
+                //console.log("Determine sync schemas and folders");
+                if (!syncSchemas || syncSchemas.length == 0) {
+                    syncSummary.syncSchemaNames = [];
+                    for (let schemaId in clientSchemaMap) {
+                        syncSummary.syncSchemaNames.push(clientSchemaMap[schemaId].name);
+                    }
+                } else {
+                    syncSummary.syncSchemaNames = syncSchemas;
                 }
-            }
-            console.log("syncSummary.syncSchemaNames: " + syncSummary.syncSchemaNames.join());
+                console.log("syncSummary.syncSchemaNames: " + syncSummary.syncSchemaNames.join());
 
-            if (!syncSummary.syncFolderNames ||
-                syncSummary.syncFolderNames.length == 0) {
-                syncSummary.syncFolderNames = [];
-                for (let folderId in clientFolderMap) {
-                    syncSummary.syncFolderNames.push(clientFolderMap[folderId].name);
+                if (!syncFolders || syncFolders.length == 0) {
+                    syncSummary.syncFolderNames = [];
+                    for (let folderId in clientFolderMap) {
+                        syncSummary.syncFolderNames.push(clientFolderMap[folderId].name);
+                    }
+                } else {
+                    syncSummary.syncFolderNames = syncFolders;
                 }
+                console.log("syncSummary.syncFolderNames: " + syncSummary.syncFolderNames.join());
             }
-            console.log("syncSummary.syncFolderNames: " + syncSummary.syncFolderNames.join());
 
+            setSchemaFolderNames();
             await send();
             await receive();
 
+            let hasDefChanges = false;
             if (syncSummary.hasDefChanges) {
                 console.log("Will sync again since last sync only refreshed def changes.");
+                hasDefChanges = true;
+                setSchemaFolderNames();
                 await send();
                 await receive();
             }
             if (syncSummary.hasDefChanges) {
                 console.log("Will sync again since last sync only refreshed def changes.");
+                hasDefChanges = true;
+                setSchemaFolderNames();
                 await send();
                 await receive();
             }
+            syncSummary.hasDefChanges = hasDefChanges;
             syncSummary.hasDataChanges = syncSummary.refreshDIU_done.reduce((sum, item) => sum + item) > 0;
         } catch (e) {
             syncSummary.syncException = e;
@@ -492,34 +490,15 @@ async function initSyncSchema(syncSchemaRow) {
         realmDef.schema.push(mTableDef);
     }
 
-    // open schema sync realm: realm for sync agent
-    console.log("open schema sync realm: realm for sync agent");
-    await Realm.open(realmDef).then((syncRealm) => {
-        if (syncRealmMap[syncSchema.id]) {
-            syncRealmMap[syncSchema.id].close();
-            delete syncRealmMap[syncSchema.id];
-        }
-        syncRealmMap[syncSchema.id] = syncRealm;
-    });
+    // open schema realm; add change listeners
+    console.log("open realm; add change listeners");
+    if (realmMap[syncSchema.id]) {
+        realmMap[syncSchema.id].close();
+        delete realmMap[syncSchema.id];
+    }
+    await Realm.open(realmDef).then((realm) => {
 
-    // open schema app realm: realm for app
-    console.log("open app realm: realm for app; add change listeners");
-    await Realm.open(realmDef).then((appRealm) => {
-        if (appRealmMap[syncSchema.id]) {
-            appRealmMap[syncSchema.id].close();
-            delete appRealmMap[syncSchema.id];
-        }
-        appRealmMap[syncSchema.id] = appRealm;
-    });
-
-    // open schema lsnr realm: realm for lsnr; add change listeners
-    console.log("open lsnr realm: realm for lsnr; add change listeners");
-    await Realm.open(realmDef).then((lsnrRealm) => {
-        if (lsnrRealmMap[syncSchema.id]) {
-            lsnrRealmMap[syncSchema.id].close();
-            delete lsnrRealmMap[syncSchema.id];
-        }
-        lsnrRealmMap[syncSchema.id] = lsnrRealm;
+        realmMap[syncSchema.id] = realm;
 
         // for each table, Add listeners
         for (let syncTable of syncSchema.tableList) {
@@ -636,7 +615,7 @@ async function initSyncSchema(syncSchemaRow) {
                 for (let pks of pkInsertions) {
                     let mTableRowNew = {};
                     mTableRowNew[syncTable.pks] = pks;
-                    let mTableRow = lsnrRealm.objectForPrimaryKey(mTableName, pks);
+                    let mTableRow = realm.objectForPrimaryKey(mTableName, pks);
                     if (mTableRow) {
                         mTableRowNew["VERSION__"] = mTableRow["VERSION__"];
                         mTableRowNew["DML__"] = (Number(mTableRow["VERSION__"]) == -1) ? "I" : "U";
@@ -649,7 +628,7 @@ async function initSyncSchema(syncSchemaRow) {
                 for (let pks of pkDeletions) {
                     let mTableRowNew = {};
                     mTableRowNew[syncTable.pks] = pks;
-                    let mTableRow = lsnrRealm.objectForPrimaryKey(mTableName, pks);
+                    let mTableRow = realm.objectForPrimaryKey(mTableName, pks);
                     if (mTableRow) {
                         mTableRowNew["VERSION__"] = mTableRow["VERSION__"];
                         mTableRowNew["DML__"] = "D";
@@ -661,7 +640,7 @@ async function initSyncSchema(syncSchemaRow) {
                 for (let pks of pkModifications) {
                     let mTableRowNew = {};
                     mTableRowNew[syncTable.pks] = pks;
-                    let mTableRow = lsnrRealm.objectForPrimaryKey(mTableName, pks);
+                    let mTableRow = realm.objectForPrimaryKey(mTableName, pks);
                     if (mTableRow) {
                         mTableRowNew["VERSION__"] = mTableRow["VERSION__"];
                         mTableRowNew["DML__"] = (Number(mTableRow["VERSION__"]) == -1) ? "I" : "U";
@@ -675,21 +654,21 @@ async function initSyncSchema(syncSchemaRow) {
                 //console.log("mTableRows.length=" + mTableRows.length);
                 if (mTableRows.length > 0) {
                     let funWrite = () => {
-                        lsnrRealm.write(() => {
+                        realm.write(() => {
                             for (let mTableRow of mTableRows) {
-                                console.log("lsnrRealm.create, " + JSON.stringify(mTableRow));
-                                lsnrRealm.create(mTableName, mTableRow, true);
+                                console.log("realm.create, " + JSON.stringify(mTableRow));
+                                realm.create(mTableName, mTableRow, true);
                             }
                         });
                     }
-                    db.safeWrite(lsnrRealm, funWrite);
+                    db.safeWrite(realm, funWrite);
                 }
             }
 
             let funWrite = () => {
-                lsnrRealm.objects(syncTable.name).addListener(tableListener);
+                realm.objects(syncTable.name).addListener(tableListener);
             }
-            db.safeWrite(lsnrRealm, funWrite);
+            db.safeWrite(realm, funWrite);
         }
 
     });
@@ -787,7 +766,6 @@ async function send() {
     // sync start
     context.onSyncStateChange("COMPOSING");
 
-
     // sync request
     let syncRequest = {};
     console.log("populating clientProperties");
@@ -806,8 +784,8 @@ async function send() {
     // Upload phase
     //
     console.log("Upload phase");
-    syncSummary.syncBeginTime = new Date().getTime();
-    syncSummary.sessionId = syncSummary.syncBeginTime;
+    syncSummary.uploadBeginTime = new Date().getTime();
+    syncSummary.sessionId = syncSummary.uploadBeginTime;
 
     await transport.openOutputStream(context.settings.syncUserName + "-" + context.settings.syncDeviceName + "-"
         + syncSummary.sessionId);
@@ -921,9 +899,9 @@ async function checkInData() {
             continue;
         }
 
-        let syncRealm = syncRealmMap[syncSchema.id];
-        if (!syncRealm) {
-            throw new Error("Faild to find syncRealm for schema " + syncSchema.name);
+        let realm = realmMap[syncSchema.id];
+        if (!realm) {
+            throw new Error("Faild to find realm for schema " + syncSchema.name);
         }
 
         console.log("Doing pre check in transaction id assignment for pervasync schema " +
@@ -951,12 +929,12 @@ async function checkInData() {
                 continue;
             }
 
-            syncRealm.write(() => {
+            realm.write(() => {
                 // Calculate deletes
                 console.log("Calculating deletes");
-                let mTableRows = syncRealm.objects(syncTable.name + "__m");
+                let mTableRows = realm.objects(syncTable.name + "__m");
                 mTableRows.forEach((mTableRow) => {
-                    let tableRow = syncRealm.objectForPrimaryKey(syncTable.name, mTableRow[syncTable.pks]);
+                    let tableRow = realm.objectForPrimaryKey(syncTable.name, mTableRow[syncTable.pks]);
                     if (!tableRow) {
                         mTableRow["DML__"] = "D";
                     }
@@ -966,7 +944,7 @@ async function checkInData() {
                 // "WHEN VERSION__>-1 AND DML__='I' THEN 'U' ELSE DML__ END), 
                 // VERSION__=VERSION__+1 WHERE DML__ IS NOT NULL";   
 
-                mTableRows = syncRealm.objects(syncTable.name + "__m").filtered("DML__!=null");
+                mTableRows = realm.objects(syncTable.name + "__m").filtered("DML__!=null");
                 mTableRows.forEach((mTableRow) => {
                     console.log("update m table: " + syncTable.name);
 
@@ -999,7 +977,7 @@ async function checkInData() {
             for (let k = 0; k < tableList.length; k++) {
                 let syncTable = tableList[k];
 
-                let mTableRows = syncRealm.objects(syncTable.name + "__m");
+                let mTableRows = realm.objects(syncTable.name + "__m");
                 if (dml == 0) { // delete
                     // SELECT VERSION__,pks  WHERE DML__='D' AND TXN__=?";                   
                     mTableRows = mTableRows.filtered("DML__='D' AND TXN__=" + transactionId);
@@ -1057,7 +1035,7 @@ async function checkInData() {
                                 }
                             }
                         } else { // insert or update
-                            tableRow = syncRealm.objectForPrimaryKey(syncTable.name, mTableRow[syncTable.pks]);
+                            tableRow = realm.objectForPrimaryKey(syncTable.name, mTableRow[syncTable.pks]);
                             for (let m = 0; m < syncTable.columnsPkRegLob.length - syncTable.lobColCount; m++) {
                                 let obj = tableRow[syncTable.columnsPkRegLob[m].columnName];
 
@@ -1438,7 +1416,7 @@ async function receive() {
 
     let uploadDurationInSeconds =
         (syncSummary.downloadBeginTime -
-            syncSummary.syncBeginTime) / 1000.0;
+            syncSummary.uploadBeginTime) / 1000.0;
     console.log("Upload time (seconds): " +
         uploadDurationInSeconds);
 
@@ -1526,7 +1504,7 @@ async function receiveServerResponse(cmd) {
         }
 
         console.log("Doing post check in cleanup for sync schema " + syncSchema.name);
-        let syncRealm = syncRealmMap[syncSchema.id];
+        let realm = realmMap[syncSchema.id];
 
         if (!syncSchema.tableList) {
             syncSchema.tableList = [];
@@ -1547,17 +1525,17 @@ async function receiveServerResponse(cmd) {
                 continue;
             }
 
-            syncRealm.write(() => {
+            realm.write(() => {
                 // DELETE syncTable.name + "__m" WHERE DML__='D' AND TXN__=?
                 // UPDATE syncTable.name + "__m"  SET DML__=NULL WHERE (DML__='I' OR DML__='U') AND TXN__=?
-                let mTableRows = syncRealm.objects(syncTable.name + "__m").filtered("TXN__=" + transactionId).snapshot();
+                let mTableRows = realm.objects(syncTable.name + "__m").filtered("TXN__=" + transactionId).snapshot();
                 for (let mTableRow of mTableRows) {
                     if (!mTableRow) {
                         console.log("Error: mTableRow=null");
                     }
                     count++;
                     if (mTableRow["DML__"] == "D") {
-                        syncRealm.delete(mTableRow); // snapshot makes delete safe
+                        realm.delete(mTableRow); // snapshot makes delete safe
                     } else { //"DML__='I' OR DML__='U'
                         mTableRow["DML__"] = null;
                     }
@@ -1702,10 +1680,9 @@ function receiveSyncSummary(cmd) {
     if (serverSyncSummary.checkInDIU_done) {
         syncSummary.checkInDIU_done = serverSyncSummary.checkInDIU_done;
     }
-    if (serverSyncSummary.errorCode > 0) {
+    if (serverSyncSummary.syncErrorMessages && serverSyncSummary.errorCode > 0
+        && serverSyncSummary.errorCode != 2059) { // PVS_CHECK_IN_SKIPPED = 2059
         syncSummary.errorCode = serverSyncSummary.errorCode;
-    }
-    if (serverSyncSummary.syncErrorMessages) {
         let serverException = "PVC_SYNC_SERVER_REPORTED_ERROR:" + serverSyncSummary.syncErrorMessages;
         syncSummary.syncException = serverException;
 
@@ -1716,15 +1693,15 @@ function receiveSyncSummary(cmd) {
             syncSummary.syncErrorMessages += "\r\n" +
                 serverSyncSummary.syncErrorMessages;
         }
-    }
 
-    if (serverSyncSummary.syncErrorStacktraces) {
-        if (!syncSummary.syncErrorStacktraces) {
-            syncSummary.syncErrorStacktraces =
-                serverSyncSummary.syncErrorStacktraces;
-        } else {
-            syncSummary.syncErrorStacktraces += "\r\n" +
-                serverSyncSummary.syncErrorStacktraces;
+        if (serverSyncSummary.syncErrorStacktraces) {
+            if (!syncSummary.syncErrorStacktraces) {
+                syncSummary.syncErrorStacktraces =
+                    serverSyncSummary.syncErrorStacktraces;
+            } else {
+                syncSummary.syncErrorStacktraces += "\r\n" +
+                    serverSyncSummary.syncErrorStacktraces;
+            }
         }
     }
 
@@ -1777,20 +1754,10 @@ async function receiveRefreshSchemaDef(cmd) {
                     }
                 }
 
-                let syncRealm = syncRealmMap[syncSchema.id];
-                if (syncRealm) {
-                    syncRealm.close();
-                    delete syncRealmMap[syncSchema.id];
-                }
-                let appRealm = appRealmMap[syncSchema.id];
-                if (appRealm) {
-                    appRealm.close();
-                    delete appRealmMap[syncSchema.id];
-                }
-                let lsnrRealm = lsnrRealmMap[syncSchema.id];
-                if (lsnrRealm) {
-                    lsnrRealm.close();
-                    delete lsnrRealmMap[syncSchema.id];
+                let realm = realmMap[syncSchema.id];
+                if (realm) {
+                    realm.close();
+                    delete realmMap[syncSchema.id];
                 }
 
             } else {
@@ -1818,7 +1785,7 @@ async function receiveRefreshSchemaDef(cmd) {
                 let syncTable = syncSchema.tableList[j];
 
                 console.log("delete/update syncTable metadata, id=" + syncTable.id
-                    + ", name=" + syncTable.name + ", column length=" + syncTable.columns.length);
+                    + ", name=" + syncTable.name);
 
                 // delete syncTable
                 let tableToDelete = pvcAdminRealm.objectForPrimaryKey("pvc__sync_tables", syncTable.id);
@@ -2100,137 +2067,144 @@ async function receiveSchema(clientSchema) {
  */
 async function receiveDml(clientSchema, dmlType, syncTable) {
     // update Table and table mate
-    let syncRealm = syncRealmMap[clientSchema.id];
+    let realm = realmMap[clientSchema.id];
 
-    // receive END_DML ERROR ROW
-    let updateCount;
-    for (; ;) {
-        //console.log("Reading cmd");
-        let cmd = await transport.readCommand();
-        console.log("Processing cmd.name " + cmd.name);
-        if (("END_" + dmlType) == cmd.name) {
-            console.log("Receiving END_" + dmlType);
-            break;
-        } else if ("SYNC_SUMMARY" != cmd.name &&
-            "ROW" != cmd.name) {
-            throw Error("Expecting END_" + dmlType +
-                ", SYNC_SUMMARY or ROW, got " + cmd.name);
-        }
+    try {
+        realm.beginTransaction();
 
-        if ("SYNC_SUMMARY" == cmd.name) {
-            //console.log("Receiving server SYNC_SUMMARY");
-            receiveSyncSummary(cmd);
-            return false;
-        }
-        //("ROW" == cmd)) {
-
-        let colValList = cmd.value;
-        if ("DELETE" == dmlType) {
-
-            syncSummary.refreshDIU_requested[0] += 1;
-            // DELETE dqTableName + " WHERE " + pkEqQs;
-            // no version for server sent delete
-
-            let pkVal;
-            if (colValList.length == 1) {
-                pkVal = db.stringToColObj(
-                    colValList[0], clientSchema.serverDbType, syncTable.columnsPkRegLob[0]);
-            } else {
-                pkVal = "";
-                for (let k = 0; k < colValList.length; k++) {
-                    if (pkVal.length > 0) {
-                        pkVal += "__";
-                    }
-                    pkVal += String(colValList[k]);
-                }
+        // receive END_DML ERROR ROW
+        let updateCount;
+        for (let i = 0; ; i++) {
+            if (i > 0 && (i % 500) == 0) {
+                realm.commitTransaction();
+                realm.beginTransaction();
+            }
+            //console.log("Reading cmd");
+            let cmd = await transport.readCommand();
+            console.log("Processing cmd.name " + cmd.name);
+            if (("END_" + dmlType) == cmd.name) {
+                console.log("Receiving END_" + dmlType);
+                break;
+            } else if ("SYNC_SUMMARY" != cmd.name &&
+                "ROW" != cmd.name) {
+                throw Error("Expecting END_" + dmlType +
+                    ", SYNC_SUMMARY or ROW, got " + cmd.name);
             }
 
-            let tableRow = syncRealm.objectForPrimaryKey(syncTable.name, pkVal);
-            let mTableRow = syncRealm.objectForPrimaryKey(syncTable.name + "__m", pkVal);
+            if ("SYNC_SUMMARY" == cmd.name) {
+                //console.log("Receiving server SYNC_SUMMARY");
+                receiveSyncSummary(cmd);
+                return false;
+            }
+            //("ROW" == cmd)) {
 
-            syncRealm.write(() => {
+            let colValList = cmd.value;
+            if ("DELETE" == dmlType) {
+
+                syncSummary.refreshDIU_requested[0] += 1;
+                // DELETE dqTableName + " WHERE " + pkEqQs;
+                // no version for server sent delete
+
+                let pkVal;
+                if (colValList.length == 1) {
+                    pkVal = db.stringToColObj(
+                        colValList[0], clientSchema.serverDbType, syncTable.columnsPkRegLob[0]);
+                } else {
+                    pkVal = "";
+                    for (let k = 0; k < colValList.length; k++) {
+                        if (pkVal.length > 0) {
+                            pkVal += "__";
+                        }
+                        pkVal += String(colValList[k]);
+                    }
+                }
+
+                let tableRow = realm.objectForPrimaryKey(syncTable.name, pkVal);
+                let mTableRow = realm.objectForPrimaryKey(syncTable.name + "__m", pkVal);
+
+                //realm.write(() => {
 
                 if (tableRow) {
                     let nidStr = "SYNC_" + new Date().getTime() + "_" + nid++;
                     nidList.push(nidStr);
                     tableRow["NID__"] = nidStr;
-                    syncRealm.delete(tableRow);
+                    realm.delete(tableRow);
                     syncSummary.refreshDIU_done[0] += 1;
                 }
                 if (mTableRow) {
-                    syncRealm.delete(mTableRow);
+                    realm.delete(mTableRow);
                 }
-            });
+                //});
 
-        } else if ("INSERT" == dmlType) {
+            } else if ("INSERT" == dmlType) {
 
-            syncSummary.refreshDIU_requested[1] += 1;
+                syncSummary.refreshDIU_requested[1] += 1;
 
-            let versionArr = colValList.slice(0, 1);
-            let pkArr = colValList.slice(1, syncTable.pkList.length + 1);
-            let colArr = colValList.slice(1, syncTable.columnsPkRegLob.length - syncTable.lobColCount + 1);
-            //console.log("syncTable.columnsPkRegLob.length: " + syncTable.columnsPkRegLob.length);
-            //console.log("syncTable.lobColCount: " + syncTable.lobColCount);
-            //console.log("colValList: " + colValList);
-            //console.log("versionArr: " + versionArr);
-            //console.log("colArr.concat(pkArr): " + colArr.concat(pkArr));
+                let versionArr = colValList.slice(0, 1);
+                let pkArr = colValList.slice(1, syncTable.pkList.length + 1);
+                let colArr = colValList.slice(1, syncTable.columnsPkRegLob.length - syncTable.lobColCount + 1);
+                //console.log("syncTable.columnsPkRegLob.length: " + syncTable.columnsPkRegLob.length);
+                //console.log("syncTable.lobColCount: " + syncTable.lobColCount);
+                //console.log("colValList: " + colValList);
+                //console.log("versionArr: " + versionArr);
+                //console.log("colArr.concat(pkArr): " + colArr.concat(pkArr));
 
-            let tableRow = {};
-            let mTableRow = {};
+                let tableRow = {};
+                let mTableRow = {};
 
-            // pk col
-            let pkVal;
-            if (pkArr.length == 1) {
-                pkVal = db.stringToColObj(
-                    pkArr[0], clientSchema.serverDbType, syncTable.columnsPkRegLob[0]);
-            } else {
-                pkVal = "";
-                for (let k = 0; k < pkArr.length; k++) {
-                    if (pkVal.length > 0) {
-                        pkVal += "__";
-                    }
-                    pkVal += String(pkArr[k]);
-                }
-            }
-            tableRow[syncTable.pks] = pkVal;
-            mTableRow[syncTable.pks] = pkVal;
-            // SET VERSION__=?, DML__=NULL
-            mTableRow["VERSION__"] = Number(versionArr[0]);
-            mTableRow["DML__"] = null;
-
-            // pk and reg cols
-            for (let k = 0; k < syncTable.columnsPkRegLob.length - syncTable.lobColCount; k++) {
-                let column = syncTable.columnsPkRegLob[k];
-                tableRow[column.columnName] = db.stringToColObj(
-                    colArr[k], clientSchema.serverDbType, column);
-                //if(tableRow[column.columnName] == null){
-                //    console.log("delete tableRow[column.columnName]: " + column.columnName);
-                //    delete tableRow[column.columnName];
-                //}
-            }
-
-            // lob cols
-            if (syncTable.lobColCount > 0) { // insert/update and there are lob cols
-                for (let i = 0; i < syncTable.lobColCount; i++) {
-                    let column = syncTable.lobColList[i];
-                    console.log("Rceiving LOB col " + column.columnName);
-                    // receiveLob
-                    let lobStr = await receiveLob();
-                    if (db.isBlob(clientSchema.serverDbType, column)) {
-                        tableRow[column.columnName] = db.stringToColObj(
-                            lobStr, clientSchema.serverDbType, column);
-                    } else {
-                        tableRow[column.columnName] = lobStr;
+                // pk col
+                let pkVal;
+                if (pkArr.length == 1) {
+                    pkVal = db.stringToColObj(
+                        pkArr[0], clientSchema.serverDbType, syncTable.columnsPkRegLob[0]);
+                } else {
+                    pkVal = "";
+                    for (let k = 0; k < pkArr.length; k++) {
+                        if (pkVal.length > 0) {
+                            pkVal += "__";
+                        }
+                        pkVal += String(pkArr[k]);
                     }
                 }
-            }
+                tableRow[syncTable.pks] = pkVal;
+                mTableRow[syncTable.pks] = pkVal;
+                // SET VERSION__=?, DML__=NULL
+                mTableRow["VERSION__"] = Number(versionArr[0]);
+                mTableRow["DML__"] = null;
 
-            syncRealm.write(() => {
+                // pk and reg cols
+                for (let k = 0; k < syncTable.columnsPkRegLob.length - syncTable.lobColCount; k++) {
+                    let column = syncTable.columnsPkRegLob[k];
+                    tableRow[column.columnName] = db.stringToColObj(
+                        colArr[k], clientSchema.serverDbType, column);
+                    //if(tableRow[column.columnName] == null){
+                    //    console.log("delete tableRow[column.columnName]: " + column.columnName);
+                    //    delete tableRow[column.columnName];
+                    //}
+                }
+
+                // lob cols
+                if (syncTable.lobColCount > 0) { // insert/update and there are lob cols
+                    for (let i = 0; i < syncTable.lobColCount; i++) {
+                        let column = syncTable.lobColList[i];
+                        console.log("Rceiving LOB col " + column.columnName);
+                        // receiveLob
+                        let lobStr = await receiveLob();
+                        if (db.isBlob(clientSchema.serverDbType, column)) {
+                            tableRow[column.columnName] = db.stringToColObj(
+                                lobStr, clientSchema.serverDbType, column);
+                        } else {
+                            tableRow[column.columnName] = lobStr;
+                        }
+                    }
+                }
+
+                //realm.write(() => {
                 let nidStr = "SYNC_" + new Date().getTime() + "_" + nid++;
                 nidList.push(nidStr);
                 tableRow["NID__"] = nidStr;
                 try {
-                    syncRealm.create(syncTable.name, tableRow, true);
+                    realm.create(syncTable.name, tableRow, true);
                 } catch (error) {
                     console.log("Writing to sync table " + syncTable.name + ", error=" + error
                         + ", tableRow=" +
@@ -2239,7 +2213,7 @@ async function receiveDml(clientSchema, dmlType, syncTable) {
                 }
 
                 try {
-                    syncRealm.create(syncTable.name + "__m", mTableRow, true);
+                    realm.create(syncTable.name + "__m", mTableRow, true);
                 } catch (error) {
                     console.log("Writing to m table " + syncTable.name + "__m, error=" + error
                         + ", mTableRow=" +
@@ -2248,11 +2222,16 @@ async function receiveDml(clientSchema, dmlType, syncTable) {
                 }
                 updateCount = 1;
                 syncSummary.refreshDIU_done[1] += updateCount;
-            });
+                //});
 
-        } else {
-            throw Error("PVC_WRONG_DML_TYPE: " + dmlType);
+            } else {
+                throw Error("PVC_WRONG_DML_TYPE: " + dmlType);
+            }
         }
+        realm.commitTransaction();
+    } catch (error) {
+        realm.cancelTransaction();
+        throw error;
     }
     return true;
 }

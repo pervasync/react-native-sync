@@ -16,6 +16,7 @@ function onSyncStateChange(state, syncSummary){
 }
 
 var settings = {
+  VERSION: "7.0.4",
   path: null,
   encryptionKey: null,
   syncServerUrl: null, // required
