@@ -1,3 +1,4 @@
-# react-native-sync
+## react-native-sync
 Two way, incremental sync between React Native realmjs database and MySQL, Oracle, MS SQL Server and PostgreSQL 
-test 2
+
+*Check out* [react-native-sync-demo](https://github.com/pervasync/react-native-sync-demo) first.
