@@ -50,6 +50,6 @@ let path = await RNSync.getPath(syncFolderName);
 
 ## Complete Example
 
-Check out [react-native-sync-demo](https://github.com/pervasync/react-native-sync-demo) ans expecially [sync.js](https://github.com/pervasync/react-native-sync-demo/blob/master/sync.js)
+Check out [react-native-sync-demo](https://github.com/pervasync/react-native-sync-demo) and expecially [sync.js](https://github.com/pervasync/react-native-sync-demo/blob/master/sync.js)
 
 
