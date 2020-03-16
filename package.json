@@ -1,7 +1,7 @@
 {
   "name": "react-native-sync",
-  "version": "1.0.3",
-  "description": "Two way, incremental sync between React Native realmjs database and MySQL, Oracle, MS SQL Server and PostgreSQL",
+  "version": "1.0.4",
+  "description": "Two way, incremental sync between React Native realmjs databases and MySQL, Oracle, MS SQL Server and PostgreSQL databases.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
