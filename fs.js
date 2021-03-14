@@ -1,4 +1,4 @@
-import RNFetchBlob from 'react-native-fetch-blob'
+import RNFetchBlob from 'rn-fetch-blob'
 import util from './util.js'
 
 var PervasyncDir = RNFetchBlob.fs.dirs.DocumentDir + "/pervasync";
