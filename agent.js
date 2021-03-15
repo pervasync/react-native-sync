@@ -511,6 +511,7 @@ async function initSyncSchema(syncSchemaRow) {
                 let pkModifications = [];
                 let pkInsertions = [];
                 let nidDeletions = [];
+                /* deletions are useless as rows are not in tableRows; tableRows is collection after deletions; use calculate
                 for (let index of changes.deletions) {
                     let tableRow = tableRows[index];
                     //console.log("index=" + index + ", tableRow=" + JSON.stringify(tableRow, null, 4));
@@ -533,7 +534,7 @@ async function initSyncSchema(syncSchemaRow) {
                         }
                         pkDeletions.push(pks);
                     }
-                }
+                }*/
                 for (let index of changes.insertions) {
                     let tableRow = tableRows[index];
                     //console.log("index=" + index + ", tableRow=" + JSON.stringify(tableRow, null, 4));
