@@ -544,7 +544,7 @@ async function initSyncSchema(syncSchemaRow) {
                     let nidStr = tableRow["NID__"];
                     if (nidList.indexOf(nidStr) > -1) {
                         nidDeletions.push(nidStr);
-                        console.log("Skip notifiction as nidStr=" + nidStr);
+                        //console.log("Skip notifiction as nidStr=" + nidStr);
                         continue;
                     }
 
@@ -565,7 +565,7 @@ async function initSyncSchema(syncSchemaRow) {
                     let nidStr = tableRow["NID__"];
                     if (nidList.indexOf(nidStr) > -1) {
                         nidDeletions.push(nidStr);
-                        console.log("Skip notifiction as nidStr=" + nidStr);
+                        //console.log("Skip notifiction as nidStr=" + nidStr);
                         continue;
                     }
 
@@ -1789,8 +1789,8 @@ async function receiveRefreshSchemaDef(cmd) {
                     + ", name=" + syncTable.name);
 
                 // delete syncTable
-                let tableToDelete = pvcAdminRealm.objectForPrimaryKey("pvc__sync_tables", syncTable.id);
-                if (tableToDelete) {
+                let tablesToDelete = pvcAdminRealm.objects("pvc__sync_tables").filtered("SYNC_SCHEMA_ID=" + syncSchema.id + " AND NAME='" + syncTable.name + "'");
+                for (let tableToDelete of tablesToDelete) {
                     pvcAdminRealm.delete(tableToDelete);
                 }
 
