@@ -1,6 +1,6 @@
 {
   "name": "react-native-sync",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Two way, incremental sync between React Native realmjs databases and MySQL, Oracle, MS SQL Server and PostgreSQL databases.",
   "main": "index.js",
   "scripts": {

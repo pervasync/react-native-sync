@@ -292,7 +292,7 @@ async function initSyncSchema(syncSchemaRow) {
     let newTablesList = [];
 
     let syncTableRows = pvcAdminRealm.objects("pvc__sync_tables");
-    syncTableRows = syncTableRows.filtered("SYNC_SCHEMA_ID=" + syncSchema.id);
+    syncTableRows = syncTableRows.filtered("SYNC_SCHEMA_ID=" + syncSchema.id).sorted("RANK", false);// order by RANK ASC
     for (let syncTableRow of syncTableRows) {
         console.log("syncTableName=" + syncTableRow["NAME"]);
         let syncTable = {};
@@ -969,126 +969,135 @@ async function checkInData() {
 
         // Table iterator
         let tableList = syncSchema.tableList;
-        //let dmlType = ["D", "I", "U"];
-        for (let dml = 0; dml < 3; dml++) {
-            if (dml > 0) {
+        let dmlType = null;//[] = { "U",   "I", "D"};
+        for (let dml1 = 1; dml1 >= 0; dml1--) {
+            if (dml1 == 0) {
                 tableList.reverse();
             }
 
             for (let k = 0; k < tableList.length; k++) {
                 let syncTable = tableList[k];
 
-                let mTableRows = realm.objects(syncTable.name + "__m");
-                if (dml == 0) { // delete
-                    // SELECT VERSION__,pks  WHERE DML__='D' AND TXN__=?";                   
-                    mTableRows = mTableRows.filtered("DML__='D' AND TXN__=" + transactionId);
-                } else if (dml == 1) { // Insert
-                    // m.VERSION__," + tCols WHERE m.DML__=? AND TXN__=?
-                    mTableRows = mTableRows.filtered("DML__='I' AND TXN__=" + transactionId);
-                } else if (dml == 2) { // update
-                    mTableRows = mTableRows.filtered("DML__='U' AND TXN__=" + transactionId);
-                }
+                for (let dml2 = 0; dml2 < dml1 + 1; dml2++) {
 
-                if (mTableRows.length > 0) {
-                    let count = 0;
-                    let dmlCmd = null;
-                    switch (dml) {
-                        case 0:
-                            dmlCmd = "DELETE";
-                            break;
-                        case 1:
-                            dmlCmd = "INSERT";
-                            break;
-                        case 2:
-                            dmlCmd = "UPDATE";
-                            break;
+                    if (dml1 == 0) {
+                        dmlType = "D";
+                    } else if (dml2 == 0) {
+                        dmlType = "U";
+                    } else if (dml2 == 1) {
+                        dmlType = "I";
                     }
-                    let cmd = {};
-                    cmd.name = dmlCmd;
-                    cmd.value = syncTable.id;
-                    await transport.writeCommand(cmd);
 
-                    for (let mTableRow of mTableRows) {
-                        let tableRow = null;
-                        let pkVals = [];
-                        count++;
-                        if (dml == 0) {
-                            syncSummary.checkInDIU_requested[0] += 1;
-                        } else if (dml == 1) {
-                            syncSummary.checkInDIU_requested[1] += 1;
-                        } else {
-                            syncSummary.checkInDIU_requested[2] += 1;
-                        }
-                        let colValList = [];
-                        //let splitted;
-                        colValList.push(String(mTableRow["VERSION__"])); // version col
-                        if (dml == 0) { // delete
-                            for (let m = 0; m < syncTable.pkList.length; m++) {
-                                let obj = mTableRow[syncTable.columnsPkRegLob[m].columnName];
+                    console.log("dmlType=" + dmlType + ", syncTable.name=" + syncTable.name);
 
-                                if (obj != null) {
-                                    // cast to String
-                                    let str = db.colObjToString(
-                                        obj, syncSchema.serverDbType, syncTable.columnsPkRegLob[m]);
-                                    colValList.push(str);
-                                } else {
-                                    colValList.push(null);
-                                }
-                            }
-                        } else { // insert or update
-                            tableRow = realm.objectForPrimaryKey(syncTable.name, mTableRow[syncTable.pks]);
-                            for (let m = 0; m < syncTable.columnsPkRegLob.length - syncTable.lobColCount; m++) {
-                                let obj = tableRow[syncTable.columnsPkRegLob[m].columnName];
 
-                                if (obj != null) {
-                                    // cast to String
-                                    let str = db.colObjToString(
-                                        obj, syncSchema.serverDbType, syncTable.columnsPkRegLob[m]);
-                                    colValList.push(str);
-                                } else {
-                                    colValList.push(null);
-                                }
-                                if (m < syncTable.pkList.length) {
-                                    pkVals.push(obj);
-                                }
-                            }
+                    let mTableRows = realm.objects(syncTable.name + "__m");
+                    // SELECT VERSION__,pks  WHERE DML__='D' AND TXN__=?";                   
+                    mTableRows = mTableRows.filtered("DML__='" + dmlType + "' AND TXN__=" + transactionId);
+
+                    if (mTableRows.length > 0) {
+                        let count = 0;
+                        let dmlCmd = null;
+                        switch (dmlType) {
+                            case "D":
+                                dmlCmd = "DELETE";
+                                break;
+                            case "I":
+                                dmlCmd = "INSERT";
+                                break;
+                            case "U":
+                                dmlCmd = "UPDATE";
+                                break;
                         }
                         let cmd = {};
-                        cmd.name = "ROW";
-                        cmd.value = colValList;
+                        cmd.name = dmlCmd;
+                        cmd.value = syncTable.id;
                         await transport.writeCommand(cmd);
 
-                        // lob payloads
-                        if ((dml == 1 || dml == 2) && syncTable.lobColCount > 0) { // insert/update and there are  lob cols
-                            for (let m = 0; m < syncTable.lobColCount; m++) {
-                                let column =
-                                    syncTable.columnsPkRegLob[m + syncTable.columnsPkRegLob.length - syncTable.lobColCount];
-                                let isBinary = (db.isBlob(syncSchema.serverDbType, column));
-                                let payload = tableRow[column.columnName];
-                                if (isBinary) {
-                                    // ArrayBuffer to hex encoded Uint8Array
-                                    payload = new Uint8Array(payload);
-                                    payload = util.bytes2hex(payload);
-                                }
-                                await sendLob(payload, isBinary);
+                        for (let mTableRow of mTableRows) {
+                            let tableRow = null;
+                            let pkVals = [];
+                            count++;
+                            if (dmlType == "D") {
+                                syncSummary.checkInDIU_requested[0] += 1;
+                            } else if (dmlType == "I") {
+                                syncSummary.checkInDIU_requested[1] += 1;
+                            } else {
+                                syncSummary.checkInDIU_requested[2] += 1;
                             }
+                            let colValList = [];
+                            //let splitted;
+                            colValList.push(String(mTableRow["VERSION__"])); // version col
+                            if (dmlType == "D") { // delete
+                                for (let m = 0; m < syncTable.pkList.length; m++) {
+                                    let obj = mTableRow[syncTable.columnsPkRegLob[m].columnName];
 
+                                    if (obj != null) {
+                                        // cast to String
+                                        let str = db.colObjToString(
+                                            obj, syncSchema.serverDbType, syncTable.columnsPkRegLob[m]);
+                                        colValList.push(str);
+                                    } else {
+                                        colValList.push(null);
+                                    }
+                                }
+                            } else { // insert or update
+                                tableRow = realm.objectForPrimaryKey(syncTable.name, mTableRow[syncTable.pks]);
+                                for (let m = 0; m < syncTable.columnsPkRegLob.length - syncTable.lobColCount; m++) {
+                                    let obj = tableRow[syncTable.columnsPkRegLob[m].columnName];
+
+                                    if (obj != null) {
+                                        // cast to String
+                                        let str = db.colObjToString(
+                                            obj, syncSchema.serverDbType, syncTable.columnsPkRegLob[m]);
+                                        colValList.push(str);
+                                    } else {
+                                        colValList.push(null);
+                                    }
+                                    if (m < syncTable.pkList.length) {
+                                        pkVals.push(obj);
+                                    }
+                                }
+                            }
+                            let cmd = {};
+                            cmd.name = "ROW";
+                            cmd.value = colValList;
+                            await transport.writeCommand(cmd);
+
+                            // lob payloads
+                            if ((dmlType == "I" || dmlType == "U") && syncTable.lobColCount > 0) { // insert/update and there are  lob cols
+                                for (let m = 0; m < syncTable.lobColCount; m++) {
+                                    let column =
+                                        syncTable.columnsPkRegLob[m + syncTable.columnsPkRegLob.length - syncTable.lobColCount];
+                                    let isBinary = (db.isBlob(syncSchema.serverDbType, column));
+                                    let payload = tableRow[column.columnName];
+                                    if (isBinary) {
+                                        // ArrayBuffer to hex encoded Uint8Array
+                                        payload = new Uint8Array(payload);
+                                        payload = util.bytes2hex(payload);
+                                    }
+                                    await sendLob(payload, isBinary);
+                                }
+
+                            }
                         }
+
+                        // TABLE DML (INSERT UPDATE DELETE) "END"
+                        let end_cmd =
+                            "END_" + dmlCmd;
+                        cmd = {};
+                        cmd.name = end_cmd;
+                        cmd.value = null;
+                        await transport.writeCommand(cmd);
+
+                        console.log(syncTable.name + ", " + dmlCmd + ", " +
+                            count);
                     }
-
-                    // TABLE DML (INSERT UPDATE DELETE) "END"
-                    let end_cmd =
-                        "END_" + dmlCmd;
-                    cmd = {};
-                    cmd.name = end_cmd;
-                    cmd.value = null;
-                    await transport.writeCommand(cmd);
-
-                    console.log(syncTable.name + ", " + dmlCmd + ", " +
-                        count);
                 }
             }
         }
+        tableList.reverse();
+
         // END_SCHEMA
         cmd = {};
         cmd.name = "END_SCHEMA";
