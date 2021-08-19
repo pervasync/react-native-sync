@@ -943,7 +943,7 @@ async function checkInData() {
 
                 // SET TXN__=?, DML__=(CASE WHEN VERSION__=-1 AND DML__='U' THEN 'I' "
                 // "WHEN VERSION__>-1 AND DML__='I' THEN 'U' ELSE DML__ END), 
-                // VERSION__=VERSION__+1 WHERE DML__ IS NOT NULL";   
+                // WHERE DML__ IS NOT NULL";   
 
                 mTableRows = realm.objects(syncTable.name + "__m").filtered("DML__!=null");
                 mTableRows.forEach((mTableRow) => {
@@ -956,7 +956,6 @@ async function checkInData() {
                         mTableRow["DML__"] = "I";
                     }
 
-                    mTableRow["VERSION__"] = mTableRow["VERSION__"] + 1;
                     mTableRow["TXN__"] = transactionId;
                 })
             })
@@ -1537,7 +1536,7 @@ async function receiveServerResponse(cmd) {
 
             realm.write(() => {
                 // DELETE syncTable.name + "__m" WHERE DML__='D' AND TXN__=?
-                // UPDATE syncTable.name + "__m"  SET DML__=NULL WHERE (DML__='I' OR DML__='U') AND TXN__=?
+                // UPDATE syncTable.name + "__m"  SET VERSION__=VERSION__+1, DML__=NULL WHERE (DML__='I' OR DML__='U') AND TXN__=?
                 let mTableRows = realm.objects(syncTable.name + "__m").filtered("TXN__=" + transactionId).snapshot();
                 for (let mTableRow of mTableRows) {
                     if (!mTableRow) {
@@ -1548,6 +1547,7 @@ async function receiveServerResponse(cmd) {
                         realm.delete(mTableRow); // snapshot makes delete safe
                     } else { //"DML__='I' OR DML__='U'
                         mTableRow["DML__"] = null;
+                        mTableRow["VERSION__"] = mTableRow["VERSION__"] + 1;
                     }
                 }
             });

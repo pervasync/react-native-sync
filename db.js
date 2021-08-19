@@ -328,7 +328,10 @@ let postgresqlToRealm = function (column, colType) {
 }
 
 let stringToColObj = function (str, serverDbType, column) {
-    
+    if(!str){
+        return null;
+    }
+
     if (column.deviceColDef.type == "bool") {
         if ("false" == str || 0 == str || "" == str) {
             return false;
@@ -345,9 +348,6 @@ let stringToColObj = function (str, serverDbType, column) {
         }
         return num;
     } else if (column.deviceColDef.type == "date") {
-        if(!str){
-            return null;
-        }
         //console.log("date before str=");
         if (str.length < 19) {
             let dateOnly = false;
