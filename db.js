@@ -328,7 +328,7 @@ let postgresqlToRealm = function (column, colType) {
 }
 
 let stringToColObj = function (str, serverDbType, column) {
-    if(!str){
+    if(str == null){
         return null;
     }
 
@@ -386,6 +386,10 @@ let stringToColObj = function (str, serverDbType, column) {
 }
 
 let colObjToString = function (obj, serverDbType, column) {
+    if(obj == null){
+        return null;
+    }
+
     if (column.deviceColDef.type == "bool") {
         if (!obj) {
             return "false";
