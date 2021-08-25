@@ -37,7 +37,7 @@ async function closeOutputStream() {//agentReceive_in) {
             pvcAdminRealm.create("pvc__payload_out", {
                 ID: payloadOutId,
                 PAYLOAD: requestTextAry.join("")
-            }, true);
+            }, 'modified');
         });
         requestTextAry = [];
         messageSize = 0;
@@ -111,7 +111,7 @@ async function writeCommand(cmd) {
             pvcAdminRealm.create("pvc__payload_out", {
                 ID: payloadOutId,
                 PAYLOAD: requestTextAry.join("")
-            }, true);
+            }, 'modified');
         });
         requestTextAry = [];
         messageSize = 0;
@@ -277,7 +277,7 @@ async function httpSend() {
             pvcAdminRealm.create("pvc__payload_in", {
                 ID: payloadInId,
                 PAYLOAD: responseText
-            }, true);
+            }, 'modified');
         });
         payloadInId = Number(payloadInId) + 1;
 

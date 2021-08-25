@@ -658,7 +658,7 @@ async function initSyncSchema(syncSchemaRow) {
                         realm.write(() => {
                             for (let mTableRow of mTableRows) {
                                 console.log("realm.create, " + JSON.stringify(mTableRow));
-                                realm.create(mTableName, mTableRow, true);
+                                realm.create(mTableName, mTableRow, 'modified');
                             }
                         });
                     }
@@ -938,6 +938,22 @@ async function checkInData() {
                     let tableRow = realm.objectForPrimaryKey(syncTable.name, mTableRow[syncTable.pks]);
                     if (!tableRow) {
                         mTableRow["DML__"] = "D";
+                        console.log("Marking mTableRow 'D', pks=" + mTableRow[syncTable.pks]);
+                    }
+                });
+
+                // Calculate inserts
+                console.log("Calculating inserts");
+                let syncTableRows = realm.objects(syncTable.name);
+                syncTableRows.forEach((syncTableRow) => {
+                    let mTableRow = realm.objectForPrimaryKey(syncTable.name + "__m", syncTableRow[syncTable.pks]);
+                    if (!mTableRow) {
+                        let mTableRowNew = {};
+                        mTableRowNew[syncTable.pks] = syncTableRow[syncTable.pks];
+                        mTableRowNew["VERSION__"] = -1;
+                        mTableRowNew["DML__"] = "I";
+                        console.log("Adding mTableRowNew, 'I', pks=" + syncTableRow[syncTable.pks]);
+                        realm.create(syncTable.name + "__m", mTableRowNew, 'modified');
                     }
                 });
 
@@ -1202,7 +1218,7 @@ async function scanFolder(syncFolder, strFolder) {
                 syncFileRow["TXN__"] = transactionId;
                 syncFileRow["ADDED"] = new Date();
 
-                pvcAdminRealm.create("pvc__sync_files", syncFileRow, true);
+                pvcAdminRealm.create("pvc__sync_files", syncFileRow, 'modified');
             });
         } else {
             // mark existing file so that we can identify deleted files
@@ -1618,7 +1634,7 @@ async function receiveServerResponse(cmd) {
             pvcAdminRealm.create("pvc__sync_client_properties", {
                 NAME: "pervasync.transaction.id",
                 VALUE: "" + transactionId
-            }, true);
+            }, 'modified');
         });
     }
 
@@ -1636,7 +1652,7 @@ async function receiveServerResponse(cmd) {
             pvcAdminRealm.create("pvc__sync_client_properties", {
                 NAME: "pervasync.client.id",
                 VALUE: "" + newSyncClientId
-            }, true);
+            }, 'modified');
         });
         console.log("SYNC_CLIENT_ID has changed. Old syncClientId = " +
             syncClientId + ", newSyncClientId = " +
@@ -1649,7 +1665,7 @@ async function receiveServerResponse(cmd) {
             pvcAdminRealm.create("pvc__sync_client_properties", {
                 NAME: "pervasync.device.name",
                 VALUE: "" + newSyncDeviceName
-            }, true);
+            }, 'modified');
         });
         console.log("syncDeviceName has changed. old syncDeviceName = " +
             context.settings.syncDeviceName + ", newSyncDeviceName = " +
@@ -1662,7 +1678,7 @@ async function receiveServerResponse(cmd) {
             pvcAdminRealm.create("pvc__sync_client_properties", {
                 NAME: "pervasync.server.id",
                 VALUE: "" + newSyncServerId
-            }, true);
+            }, 'modified');
         });
         console.log("syncServerId has changed. old syncServerId = " +
             syncServerId + ", newSyncServerId = " +
@@ -1786,7 +1802,7 @@ async function receiveRefreshSchemaDef(cmd) {
                 realmSyncSchema["NO_INIT_SYNC_NETWORKS"] = syncSchema.noInitSyncNetworks;
                 realmSyncSchema["NO_SYNC_NETWORKS"] = syncSchema.noSyncNetworks;
                 realmSyncSchema["ADDED"] = new Date();
-                pvcAdminRealm.create("pvc__sync_schemas", realmSyncSchema, true);
+                pvcAdminRealm.create("pvc__sync_schemas", realmSyncSchema, 'modified');
             }
 
             // for each table, insert or delete metadata
@@ -1847,7 +1863,7 @@ async function receiveRefreshSchemaDef(cmd) {
                 }
 
                 // insert syncTable
-                pvcAdminRealm.create("pvc__sync_tables", realmSyncTable, true);
+                pvcAdminRealm.create("pvc__sync_tables", realmSyncTable, 'modified');
             }
         });
 
@@ -1941,7 +1957,7 @@ async function receiveRefreshFolderDef(cmd) {
                 realmSyncFolder["NO_INIT_SYNC_NETWORKS"] = syncFolder.noInitSyncNetworks;
                 realmSyncFolder["NO_SYNC_NETWORKS"] = syncFolder.noSyncNetworks;
                 realmSyncFolder["ADDED"] = new Date();
-                pvcAdminRealm.create("pvc__sync_folders", realmSyncFolder, true);
+                pvcAdminRealm.create("pvc__sync_folders", realmSyncFolder, 'modified');
             }
 
         });
@@ -2214,7 +2230,7 @@ async function receiveDml(clientSchema, dmlType, syncTable) {
                 nidList.push(nidStr);
                 tableRow["NID__"] = nidStr;
                 try {
-                    realm.create(syncTable.name, tableRow, true);
+                    realm.create(syncTable.name, tableRow, 'modified');
                 } catch (error) {
                     console.log("Writing to sync table " + syncTable.name + ", error=" + error
                         + ", tableRow=" +
@@ -2223,7 +2239,7 @@ async function receiveDml(clientSchema, dmlType, syncTable) {
                 }
 
                 try {
-                    realm.create(syncTable.name + "__m", mTableRow, true);
+                    realm.create(syncTable.name + "__m", mTableRow, 'modified');
                 } catch (error) {
                     console.log("Writing to m table " + syncTable.name + "__m, error=" + error
                         + ", mTableRow=" +
@@ -2514,7 +2530,7 @@ async function receiveFolder(syncFolder) {
                         syncFileRow["FILE_CN"] = syncFile.fileCn;
                         syncFileRow["FILE_CT"] = syncFile.fileCt;
                         syncFileRow["ADDED"] = new Date();
-                        pvcAdminRealm.create("pvc__sync_files", syncFileRow, true);
+                        pvcAdminRealm.create("pvc__sync_files", syncFileRow, 'modified');
                     }
                 });
             }
