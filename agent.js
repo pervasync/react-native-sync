@@ -505,6 +505,7 @@ async function initSyncSchema(syncSchemaRow) {
             //console.log("Add change listener for table " + syncTable.name);
 
             let tableListener = (tableRows, changes) => {
+                console.log("tableListener, syncTable.name: " + syncTable.name);
                 let mTableName = syncTable.name + "__m";
 
                 let pkDeletions = [];
@@ -932,7 +933,7 @@ async function checkInData() {
 
             realm.write(() => {
                 // Calculate deletes
-                console.log("Calculating deletes");
+                console.log("Calculating deletes, syncTable.name: " + syncTable.name);
                 let mTableRows = realm.objects(syncTable.name + "__m");
                 mTableRows.forEach((mTableRow) => {
                     let tableRow = realm.objectForPrimaryKey(syncTable.name, mTableRow[syncTable.pks]);
@@ -943,7 +944,7 @@ async function checkInData() {
                 });
 
                 // Calculate inserts
-                console.log("Calculating inserts");
+                console.log("Calculating inserts, syncTable.name: " + syncTable.name);
                 let syncTableRows = realm.objects(syncTable.name);
                 syncTableRows.forEach((syncTableRow) => {
                     let mTableRow = realm.objectForPrimaryKey(syncTable.name + "__m", syncTableRow[syncTable.pks]);
@@ -962,8 +963,8 @@ async function checkInData() {
                 // WHERE DML__ IS NOT NULL";   
 
                 mTableRows = realm.objects(syncTable.name + "__m").filtered("DML__!=null");
+                console.log("update m table: " + syncTable.name);
                 mTableRows.forEach((mTableRow) => {
-                    console.log("update m table: " + syncTable.name);
 
                     if (mTableRow["VERSION__"] > -1 && mTableRow["DML__"] == "I") {
                         mTableRow["DML__"] = "U";
@@ -1691,7 +1692,7 @@ async function receiveServerResponse(cmd) {
 function receiveSyncSummary(cmd) {
     let serverSyncSummary = cmd.value;
 
-    //console.log("serverSyncSummary:\r\n" + JSON.stringify(serverSyncSummary, null, 4));
+    console.log("serverSyncSummary:\r\n" + JSON.stringify(serverSyncSummary, null, 4));
     //console.log("merging server syncSummary with client syncSummary");
 
     if (syncSummary.checkInStatus != "FAILURE") {
@@ -1729,6 +1730,8 @@ function receiveSyncSummary(cmd) {
                     serverSyncSummary.syncErrorStacktraces;
             }
         }
+        console.log("syncSummary:\r\n" + JSON.stringify(syncSummary, null, 4));
+
     }
 
     syncSummary.serverSnapshotAge = serverSyncSummary.serverSnapshotAge;

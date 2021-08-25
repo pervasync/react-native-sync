@@ -62,7 +62,7 @@ async function closeInputStream() {
 
 // writeCommand
 async function writeCommand(cmd) {
-    console.log("writing " + cmd.name);
+    //console.log("writing " + cmd.name);
     let cmdJsonLength, strCmdJsonLength, cmdJson, cmdValueJson;
 
     if (cmd.value) {
