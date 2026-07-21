@@ -37,7 +37,13 @@ let getDeviceColDef = function (serverDbType, column) {
     // this needs to go before calling stringToColObj
     column.deviceColDef = colDef;
 
-    if (colDef.default) {
+    if (colDef.default && isGeneratedDefault(colDef.default)) {
+        // Server-side expressions, such as Oracle identity-column sequences,
+        // cannot be represented as Realm defaults.  In particular, trying to
+        // coerce "'ISEQ$$_...'.nextval" to an integer prevents the Realm from
+        // being opened during initial sync.
+        colDef.default = null;
+    } else if (colDef.default) {
         try {
             colDef.default = stringToColObj(colDef.default, serverDbType, column);
         } catch (error) {
@@ -49,6 +55,13 @@ let getDeviceColDef = function (serverDbType, column) {
     }
 
     return colDef;
+}
+
+// Defaults returned by JDBC are SQL expressions rather than values.  Realm
+// only accepts concrete JavaScript defaults, so leave generated values unset
+// and let the server generate them when a row is checked in.
+let isGeneratedDefault = function (value) {
+    return typeof value == "string" && /\.nextval\s*$/i.test(value.trim());
 }
 
 let mysqlToRealm = function (column, colType) {
