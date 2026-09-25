@@ -1,0 +1,41 @@
+name: Publish package to npm
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          package-manager-cache: false
+
+      - name: Verify tag matches package version
+        if: github.event_name == 'push'
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          test "$GITHUB_REF_NAME" = "v$PACKAGE_VERSION"
+
+      - name: Run tests
+        run: npm test
+
+      - name: Publish package
+        run: npm publish --access public
