@@ -43,6 +43,15 @@ jobs:
       - name: Publish package
         shell: bash
         run: |
+          PACKAGE_NAME="$(node -p "require('./package.json').name")"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          PACKAGE_SPEC="$PACKAGE_NAME@$PACKAGE_VERSION"
+
+          if npm view "$PACKAGE_SPEC" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "::notice title=npm publish verified::$PACKAGE_SPEC is already available from npm."
+            exit 0
+          fi
+
           set +e
           npm publish --access public 2>&1 | tee /tmp/npm-publish.log
           PUBLISH_STATUS=${PIPESTATUS[0]}
@@ -57,3 +66,14 @@ jobs:
             echo "::error title=npm publish failed::$PUBLISH_ERROR"
             exit "$PUBLISH_STATUS"
           fi
+
+          for VERIFY_ATTEMPT in 1 2 3 4 5; do
+            if npm view "$PACKAGE_SPEC" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+              echo "::notice title=npm publish verified::$PACKAGE_SPEC is available from npm."
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "::error title=npm publish verification failed::$PACKAGE_SPEC was not visible from npm after publishing."
+          exit 1
