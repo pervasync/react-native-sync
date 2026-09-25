@@ -41,4 +41,19 @@ jobs:
         run: npm test
 
       - name: Publish package
-        run: npm publish --access public
+        shell: bash
+        run: |
+          set +e
+          npm publish --access public 2>&1 | tee /tmp/npm-publish.log
+          PUBLISH_STATUS=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$PUBLISH_STATUS" -ne 0 ]; then
+            PUBLISH_ERROR="$(grep -E 'npm (error|ERR!)' /tmp/npm-publish.log | tail -20 | tr '\n' ' ')"
+            if [ -z "$PUBLISH_ERROR" ]; then
+              PUBLISH_ERROR="$(tail -20 /tmp/npm-publish.log | tr '\n' ' ')"
+            fi
+            PUBLISH_ERROR="${PUBLISH_ERROR//'%'/'%25'}"
+            echo "::error title=npm publish failed::$PUBLISH_ERROR"
+            exit "$PUBLISH_STATUS"
+          fi
