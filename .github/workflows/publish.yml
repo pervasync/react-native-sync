@@ -24,9 +24,12 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: "22.14.0"
           registry-url: "https://registry.npmjs.org"
           package-manager-cache: false
+
+      - name: Install npm with trusted-publishing support
+        run: npm install --global npm@11.5.1
 
       - name: Verify tag matches package version
         if: github.event_name == 'push'
