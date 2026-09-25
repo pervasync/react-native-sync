@@ -1,4 +1,5 @@
 import context from './context.js'
+import { retryAsync } from './retry.js'
 
 //
 // transport, write to and read from temp DB table
@@ -12,6 +13,7 @@ let requestTextAry, requestText, responseText, responseOffset;
 // transport.openOutputStream
 async function openOutputStream(sessionId_in) {
     sessionId = sessionId_in; // new session
+    serverMore = false;
     messageId = -1;
     payloadOutId = 0;
     payloadInId = 0;
@@ -228,8 +230,6 @@ async function httpSend() {
         throw Error("No more request to send");
     }
 
-    context.onSyncStateChange("SENDING");
-
     let headers = {
         "Content-Type": "application/octet-stream",
         "transport-serialization": "Json",
@@ -244,57 +244,94 @@ async function httpSend() {
         throw new Error("Invalid sessionId: " + sessionId);
     }
 
-    console.log("Calling fetch for message #" + messageId
-        + ". headers=" + JSON.stringify(headers));
-        //+ ". body=" + requestText);
-    await fetch(context.settings.syncServerUrl, {
-        method: "POST",
-        headers: headers,
-        body: requestText
-    }).then((response) => {
+    const requestSessionId = sessionId;
+    const requestMessageId = messageId;
+    // The server treats a repeated message ID as a resend request and replays
+    // its saved response. Keep the session ID, message ID and body unchanged
+    // across transient fetch/body-read failures.
+    const responseResult = await retryAsync(async () => {
+        context.onSyncStateChange("SENDING");
+        console.log("Calling fetch for message #" + requestMessageId
+            + ". headers=" + JSON.stringify(headers));
+            //+ ". body=" + requestText);
+
+        const response = await fetch(context.settings.syncServerUrl, {
+            method: "POST",
+            headers: headers,
+            body: requestText
+        });
+
         context.onSyncStateChange("RECEIVING");
         //console.log("response=" + JSON.stringify(response));
         if (!response.ok) {
-            throw Error("Got non-OK response: " + response.status);
+            const statusError = Error("Got non-OK response: " + response.status);
+            statusError.retryable = false;
+            throw statusError;
         }
-        let responseHeaders = response.headers;
 
-        sessionId = responseHeaders.get("session-id");
-        messageId = Number(responseHeaders.get("message-id"));
-        console.log("Response sessionId: " + sessionId);
-        console.log("Response messageId: " + messageId);
-        return response.text();
-    }).then((responseText) => {
-        console.log("Recieved responseText, length: " + responseText.length);
-        //if (responseText.length < 2000) {
-            //console.log("responseText: " + responseText);
-        //}
-
-        // save responseText to DB
-        pvcAdminRealm = context.pvcAdminRealm;
-        pvcAdminRealm.write(() => {
-            console.log("save responseText to DB");
-            pvcAdminRealm.create("pvc__payload_in", {
-                ID: payloadInId,
-                PAYLOAD: responseText
-            }, 'modified');
-        });
-        payloadInId = Number(payloadInId) + 1;
-
-        // http transport done?
-        if (responseText.length >= context.settings.morePayload.length &&
-            context.settings.morePayload ==
-            responseText.substr(responseText.length - context.settings.morePayload.length,
-                context.settings.morePayload.length)) {
-            console.log("Server has more to send");
-            serverMore = true;
-            return httpSend();
-        } else {
-            console.log("http transport done");
-            serverMore = false;
-            //agentReceive();
+        const responseSessionId = response.headers.get("session-id");
+        const responseMessageIdText = response.headers.get("message-id");
+        const responseMessageId = Number(responseMessageIdText);
+        if (!responseSessionId || responseMessageIdText == null
+            || String(responseMessageIdText).trim().length == 0
+            || !Number.isFinite(responseMessageId)) {
+            throw Error("Invalid sync response session-id or message-id");
         }
-    })
+
+        const responseText = await response.text();
+        return {
+            sessionId: responseSessionId,
+            messageId: responseMessageId,
+            responseText
+        };
+    }, {
+        retryCount: context.settings.httpRetryCount,
+        baseDelayMillis: context.settings.httpRetryDelayMillis,
+        isRetryable: (error) => !error || error.retryable !== false,
+        onRetry: (error, retryNumber, delayMillis) => {
+            console.warn("Sync HTTP request failed; retrying the same session/message."
+                + " sessionId=" + requestSessionId
+                + ", messageId=" + requestMessageId
+                + ", retry=" + retryNumber
+                + ", delayMillis=" + delayMillis
+                + ", error=" + error);
+        }
+    });
+
+    sessionId = responseResult.sessionId;
+    messageId = responseResult.messageId;
+    responseText = responseResult.responseText;
+    console.log("Response sessionId: " + sessionId);
+    console.log("Response messageId: " + messageId);
+    console.log("Recieved responseText, length: " + responseText.length);
+    //if (responseText.length < 2000) {
+        //console.log("responseText: " + responseText);
+    //}
+
+    // save responseText to DB
+    pvcAdminRealm = context.pvcAdminRealm;
+    pvcAdminRealm.write(() => {
+        console.log("save responseText to DB");
+        pvcAdminRealm.create("pvc__payload_in", {
+            ID: payloadInId,
+            PAYLOAD: responseText
+        }, 'modified');
+    });
+    payloadInId = Number(payloadInId) + 1;
+
+    // http transport done?
+    if (responseText.length >= context.settings.morePayload.length &&
+        context.settings.morePayload ==
+        responseText.substr(responseText.length - context.settings.morePayload.length,
+            context.settings.morePayload.length)) {
+        console.log("Server has more to send");
+        serverMore = true;
+        return httpSend();
+    } else {
+        console.log("http transport done");
+        serverMore = false;
+        //agentReceive();
+    }
 }
 
 export default {
@@ -305,6 +342,3 @@ export default {
     writeCommand,
     readCommand
 }
-
-
-

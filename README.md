@@ -39,6 +39,14 @@ This library is available on npm, install it with: `npm install --save react-nat
     let syncSummary = await RNSync.sync();
     ```
 
+    Concurrent calls for the same sync request share the active session. The
+    HTTP transport also retries an interrupted request with the same session
+    and message identifiers, which lets a compatible Pervasync server resend
+    the saved response without starting a competing session. The defaults are
+    three retries with exponential delays of one, two, and four seconds. They
+    can be changed during configuration with `httpRetryCount` and
+    `httpRetryDelayMillis`.
+
 4. Get a handle to the synced realm database and synced folder path:
 
     ```javascript
@@ -49,5 +57,4 @@ This library is available on npm, install it with: `npm install --save react-nat
 ## Complete Example
 
 Check out [react-native-sync-demo](https://github.com/pervasync/react-native-sync-demo) and expecially [sync.js](https://github.com/pervasync/react-native-sync-demo/blob/master/sync.js)
-
 

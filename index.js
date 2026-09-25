@@ -2,6 +2,9 @@ import context from './context.js'
 import setup from "./setup.js";
 import agent from "./agent.js";
 import fs from "./fs.js";
+import { createSyncCoordinator } from "./sync-control.js";
+
+const publicSyncCoordinator = createSyncCoordinator();
 
 async function config(settings, reset) {
 
@@ -37,7 +40,11 @@ function getPath(folderName) {
   }
 }
 
-async function sync() {
+function sync() {
+  return publicSyncCoordinator.run("default-sync", runSync);
+}
+
+async function runSync() {
   console.log("context.settings.path=" + context.settings.path);
 
   if (context.settings.configured) {

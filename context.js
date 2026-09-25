@@ -26,6 +26,8 @@ var settings = {
   adminDbName: "pvcadmin.realm",
   maxMessageSize: 2000000,
   lobBufferSize: 400000,
+  httpRetryCount: 3,
+  httpRetryDelayMillis: 1000,
   morePayload: "31{\"name\":\"MORE\",\"valueLength\":0}"
 }
 

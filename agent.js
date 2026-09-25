@@ -5,6 +5,7 @@ import transport from './transport.js'
 import db from './db.js'
 import fs from './fs.js'
 import util from './util.js'
+import { createSyncCoordinator, runDefinitionAwareSync } from './sync-control.js'
 
 let clientSchemaList = [];
 let clientSchemaMap = {};
@@ -29,6 +30,10 @@ let transactionId = 0;
 
 let nidList = [];
 let nid = 0;
+
+const syncCoordinator = createSyncCoordinator((syncing) => {
+    context.syncing = syncing;
+});
 
 context.onSyncStateChange("READY");
 
@@ -124,141 +129,144 @@ function getPath(folderName) {
 * TWO_WAY. If null, defaults to TWO_WAY.
 * @param syncSchemas List of sync schema names to sync.
 * To sync all, use a null or empty syncSchemaNames.
-* @returns A promise of SyncSummary object
-* @throws An error if there is already an active sync session
+* @returns A promise of SyncSummary object. An identical concurrent request
+* shares the active promise.
+* @throws An error if a sync with a different direction or scope is active.
 */
-async function sync(syncDirection, syncSchemas, syncFolders) {
-    // TODO remove
-    context.syncing = false;
+function sync(syncDirection, syncSchemas, syncFolders) {
+    syncDirection = syncDirection || "TWO_WAY";
+    syncSchemas = (!syncSchemas || syncSchemas.length == 0) ? [] : Array.from(syncSchemas);
+    syncFolders = (!syncFolders || syncFolders.length == 0) ? [] : Array.from(syncFolders);
 
-    if (!context.syncing) {
-        try {
-            // reset syncSummary
-            for (let key in syncSummary) {
-                delete syncSummary[key]
+    const requestKey = JSON.stringify({
+        syncDirection,
+        syncSchemas,
+        syncFolders
+    });
+
+    return syncCoordinator.run(requestKey, () => runSync(syncDirection, syncSchemas, syncFolders));
+}
+
+async function runSync(syncDirection, syncSchemas, syncFolders) {
+    let hasDefChanges = false;
+    try {
+        // reset syncSummary
+        for (let key in syncSummary) {
+            delete syncSummary[key]
+        }
+
+        console.log("syncServerUrl=" + context.settings.syncServerUrl);
+        console.log("syncUserName=" + context.settings.syncUserName);
+        console.log("syncDeviceName=" + context.settings.syncDeviceName);
+
+        let clientPropertiesRows = pvcAdminRealm.objects("pvc__sync_client_properties");
+        for (let clientPropertiesRow of clientPropertiesRows) {
+            if (clientPropertiesRow["NAME"] == "pervasync.client.id") {
+                syncClientId =
+                    Number(clientPropertiesRow["VALUE"]);
             }
-
-            console.log("syncServerUrl=" + context.settings.syncServerUrl);
-            console.log("syncUserName=" + context.settings.syncUserName);
-            console.log("syncDeviceName=" + context.settings.syncDeviceName);
-
-            let clientPropertiesRows = pvcAdminRealm.objects("pvc__sync_client_properties");
-            for (let clientPropertiesRow of clientPropertiesRows) {
-                if (clientPropertiesRow["NAME"] == "pervasync.client.id") {
-                    syncClientId =
-                        Number(clientPropertiesRow["VALUE"]);
-                }
-                if (clientPropertiesRow["NAME"] == "pervasync.server.id") {
-                    syncServerId =
-                        Number(clientPropertiesRow["VALUE"]);
-                }
-                if (clientPropertiesRow["NAME"] == "pervasync.transaction.id") {
-                    transactionId =
-                        Number(clientPropertiesRow["VALUE"]);
-                }
+            if (clientPropertiesRow["NAME"] == "pervasync.server.id") {
+                syncServerId =
+                    Number(clientPropertiesRow["VALUE"]);
             }
-
-            console.log("syncClientId=" + syncClientId);
-            console.log("syncServerId=" + syncServerId);
-            console.log("transactionId=" + transactionId);
-
-            if (!syncDirection) {
-                syncDirection = "TWO_WAY";
+            if (clientPropertiesRow["NAME"] == "pervasync.transaction.id") {
+                transactionId =
+                    Number(clientPropertiesRow["VALUE"]);
             }
+        }
 
-            // sync summary
-            syncSummary.syncBeginTime = new Date().getTime();
-            syncSummary.checkInDIU_requested = [0, 0, 0];
-            syncSummary.checkInDIU_done = [0, 0, 0];
-            syncSummary.refreshDIU_requested = [0, 0, 0];
-            syncSummary.refreshDIU_done = [0, 0, 0];
+        console.log("syncClientId=" + syncClientId);
+        console.log("syncServerId=" + syncServerId);
+        console.log("transactionId=" + transactionId);
+
+        // sync summary
+        syncSummary.syncBeginTime = new Date().getTime();
+        syncSummary.checkInDIU_requested = [0, 0, 0];
+        syncSummary.checkInDIU_done = [0, 0, 0];
+        syncSummary.refreshDIU_requested = [0, 0, 0];
+        syncSummary.refreshDIU_done = [0, 0, 0];
+        syncSummary.hasDefChanges = false;
+        syncSummary.hasDataChanges = false;
+        syncSummary.errorCode = -1;
+        syncSummary.checkInStatus = "NOT_AVAILABLE";
+        syncSummary.checkInSchemaNames = [];
+        syncSummary.refreshSchemaNames = [];
+        syncSummary.checkInFolderNames = [];
+        syncSummary.refreshFolderNames = [];
+
+        syncSummary.refreshStatus = "NOT_AVAILABLE";
+        syncSummary.serverSnapshotAge = -1;
+
+        syncSummary.user = context.settings.syncUserName;
+        syncSummary.device = context.settings.syncDeviceName;
+        syncSummary.syncDirection = syncDirection;
+        syncSummary.syncErrorMessages = "";
+        syncSummary.syncErrorStacktraces = "";
+
+        let setSchemaFolderNames = function () {
+            //console.log("Determine sync schemas and folders");
+            if (!syncSchemas || syncSchemas.length == 0) {
+                syncSummary.syncSchemaNames = [];
+                for (let schemaId in clientSchemaMap) {
+                    syncSummary.syncSchemaNames.push(clientSchemaMap[schemaId].name);
+                }
+            } else {
+                syncSummary.syncSchemaNames = syncSchemas;
+            }
+            console.log("syncSummary.syncSchemaNames: " + syncSummary.syncSchemaNames.join());
+
+            if (!syncFolders || syncFolders.length == 0) {
+                syncSummary.syncFolderNames = [];
+                for (let folderId in clientFolderMap) {
+                    syncSummary.syncFolderNames.push(clientFolderMap[folderId].name);
+                }
+            } else {
+                syncSummary.syncFolderNames = syncFolders;
+            }
+            console.log("syncSummary.syncFolderNames: " + syncSummary.syncFolderNames.join());
+        }
+
+        const passResult = await runDefinitionAwareSync(async () => {
+            // This flag describes the current pass. Reset it so a prior
+            // definition refresh does not force an unnecessary third pass.
             syncSummary.hasDefChanges = false;
-            syncSummary.hasDataChanges = false;
-            syncSummary.errorCode = -1;
-            syncSummary.checkInStatus = "NOT_AVAILABLE";
-            syncSummary.checkInSchemaNames = [];
-            syncSummary.refreshSchemaNames = [];
-            syncSummary.checkInFolderNames = [];
-            syncSummary.refreshFolderNames = [];
-
-            syncSummary.refreshStatus = "NOT_AVAILABLE";
-            syncSummary.serverSnapshotAge = -1;
-
-            syncSummary.user = context.settings.syncUserName;
-            syncSummary.device = context.settings.syncDeviceName;
-            syncSummary.syncDirection = syncDirection;
-            syncSummary.syncErrorMessages = "";
-            syncSummary.syncErrorStacktraces = "";
-
-            let setSchemaFolderNames = function () {
-                //console.log("Determine sync schemas and folders");
-                if (!syncSchemas || syncSchemas.length == 0) {
-                    syncSummary.syncSchemaNames = [];
-                    for (let schemaId in clientSchemaMap) {
-                        syncSummary.syncSchemaNames.push(clientSchemaMap[schemaId].name);
-                    }
-                } else {
-                    syncSummary.syncSchemaNames = syncSchemas;
-                }
-                console.log("syncSummary.syncSchemaNames: " + syncSummary.syncSchemaNames.join());
-
-                if (!syncFolders || syncFolders.length == 0) {
-                    syncSummary.syncFolderNames = [];
-                    for (let folderId in clientFolderMap) {
-                        syncSummary.syncFolderNames.push(clientFolderMap[folderId].name);
-                    }
-                } else {
-                    syncSummary.syncFolderNames = syncFolders;
-                }
-                console.log("syncSummary.syncFolderNames: " + syncSummary.syncFolderNames.join());
-            }
-
             setSchemaFolderNames();
             await send();
             await receive();
+            hasDefChanges = hasDefChanges || syncSummary.hasDefChanges;
+            return syncSummary.hasDefChanges;
+        }, 3, () => {
+            console.log("Will sync again since last sync only refreshed def changes.");
+        });
 
-            let hasDefChanges = false;
-            if (syncSummary.hasDefChanges) {
-                console.log("Will sync again since last sync only refreshed def changes.");
-                hasDefChanges = true;
-                setSchemaFolderNames();
-                await send();
-                await receive();
-            }
-            if (syncSummary.hasDefChanges) {
-                console.log("Will sync again since last sync only refreshed def changes.");
-                hasDefChanges = true;
-                setSchemaFolderNames();
-                await send();
-                await receive();
-            }
-            syncSummary.hasDefChanges = hasDefChanges;
-            syncSummary.hasDataChanges = syncSummary.refreshDIU_done.reduce((sum, item) => sum + item) > 0;
-        } catch (e) {
-            syncSummary.syncException = e;
-            syncSummary.syncErrorMessages += e;
-            context.onSyncStateChange("FAILED", syncSummary);
+        if (passResult.pendingDefChanges) {
+            console.warn("Definition changes are still pending after three sync passes.");
         }
-
-        syncSummary.syncEndTime = new Date().getTime();
-        syncSummary.syncDuration = (syncSummary.syncEndTime - syncSummary.syncBeginTime) / 1000.00 + " seconds";
-
-        if (syncSummary.syncException) {
-            if (context.syncState != "FAILED") {
-                context.onSyncStateChange("FAILED", syncSummary);
-            }
-            console.log("Sync completed with error: " + syncSummary.syncException);
-        } else {
-            context.onSyncStateChange("SUCCEEDED", syncSummary);
-            console.log("Sync completed successfully");
-        }
-
-        return syncSummary;
-
-    } else {
-        throw new Error("There is already an active sync session. Will not start a new one.");
+        syncSummary.hasDataChanges = syncSummary.refreshDIU_done.reduce((sum, item) => sum + item) > 0;
+    } catch (e) {
+        syncSummary.syncException = e;
+        syncSummary.syncErrorMessages += e;
+        context.onSyncStateChange("FAILED", syncSummary);
     }
 
+    // Preserve whether any completed pass refreshed definitions, including
+    // when a later pass fails.
+    syncSummary.hasDefChanges = hasDefChanges || syncSummary.hasDefChanges;
+
+    syncSummary.syncEndTime = new Date().getTime();
+    syncSummary.syncDuration = (syncSummary.syncEndTime - syncSummary.syncBeginTime) / 1000.00 + " seconds";
+
+    if (syncSummary.syncException) {
+        if (context.syncState != "FAILED") {
+            context.onSyncStateChange("FAILED", syncSummary);
+        }
+        console.log("Sync completed with error: " + syncSummary.syncException);
+    } else {
+        context.onSyncStateChange("SUCCEEDED", syncSummary);
+        console.log("Sync completed successfully");
+    }
+
+    return syncSummary;
 }
 
 /**
