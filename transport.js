@@ -265,7 +265,7 @@ async function httpSend() {
         //console.log("response=" + JSON.stringify(response));
         if (!response.ok) {
             const statusError = Error("Got non-OK response: " + response.status);
-            statusError.retryable = false;
+            statusError.retryable = [502, 503, 504].includes(response.status);
             throw statusError;
         }
 
