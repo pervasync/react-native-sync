@@ -47,6 +47,11 @@ This library is available on npm, install it with: `npm install --save react-nat
     can be changed during configuration with `httpRetryCount` and
     `httpRetryDelayMillis`.
 
+    HTTP 502, 503, and 504 responses use the same bounded retry policy. Other
+    HTTP errors are returned without retrying. Retries preserve the session,
+    message identifier, and request body; persistent gateway timeouts still
+    require investigation of proxy limits and server processing time.
+
 4. Get a handle to the synced realm database and synced folder path:
 
     ```javascript
@@ -57,4 +62,3 @@ This library is available on npm, install it with: `npm install --save react-nat
 ## Complete Example
 
 Check out [react-native-sync-demo](https://github.com/pervasync/react-native-sync-demo) and expecially [sync.js](https://github.com/pervasync/react-native-sync-demo/blob/master/sync.js)
-
